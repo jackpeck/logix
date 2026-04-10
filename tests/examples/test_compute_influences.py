@@ -93,10 +93,17 @@ class TestSingleCheckpointInfluence(unittest.TestCase):
 
         # Gradient & Hessian logging
         logix.watch(model, name_filter=["1", "3", "5"])
+        logix.setup(
+            {
+                "forward": ["covariance"],
+                "backward": ["covariance"],
+                "grad": ["log"],
+            }
+        )
+        logix.save(True)
         id_gen = DataIDGenerator()
         for inputs, targets in train_loader:
             data_id = id_gen(inputs)
-            logix.setup({"log": "grad", "save": "grad", "statistic": "kfac"})
             with logix(data_id=data_id):
                 inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
                 model.zero_grad()
@@ -107,10 +114,12 @@ class TestSingleCheckpointInfluence(unittest.TestCase):
 
         # Influence Analysis
         log_loader = logix.build_log_dataloader()
+        self.assertGreater(len(log_loader.dataset), 0, "No training logs were saved")
+        self.assertTrue(
+            logix.state.covariance_state,
+            "No covariance statistics were computed before influence evaluation",
+        )
 
-        from logix.analysis import InfluenceFunction
-
-        # logix.add_analysis({"influence": InfluenceFunction})
         query_iter = iter(query_loader)
         logix.eval()
         logix.setup({"grad": ["log"]})
@@ -124,4 +133,10 @@ class TestSingleCheckpointInfluence(unittest.TestCase):
             )
             test_loss.backward()
             test_log = al.get_log()
-        logix.influence.compute_influence_all(test_log, log_loader)
+        with self.assertNoLogs("AnaLog", level="WARNING"):
+            result = logix.influence.compute_influence_all(
+                test_log, log_loader, hessian="kfac", damping=1e-5
+            )
+        self.assertIn("influence", result)
+        self.assertEqual(result["influence"].shape[0], 1)
+        self.assertEqual(result["influence"].shape[1], len(log_loader.dataset))

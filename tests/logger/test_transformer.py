@@ -28,18 +28,7 @@ class TestTransformerGradients(unittest.TestCase):
         self.model.eval()
         self.func_model.eval()
 
-    def test_per_sample_gradient(self):
-        # Instantiate LogIX
-        logix = LogIX(project="test")
-        logix.watch(self.model)
-
-        # Input and target for batch size of 4
-        input_ids = torch.randint(0, 32, (4, 10))  # Dummy token IDs
-        attention_mask = torch.ones(4, 10)  # All tokens are 'real'
-        labels = torch.tensor([1, 0, 1, 0])  # Dummy labels
-        batch = (input_ids, attention_mask, labels)
-
-        # functorch per-sample gradient
+    def _compute_reference_grads(self, batch):
         def compute_loss_func(_params, _buffers, _batch):
             _output = torch.func.functional_call(
                 self.func_model,
@@ -54,15 +43,38 @@ class TestTransformerGradients(unittest.TestCase):
 
         func_compute_grad = torch.func.grad(compute_loss_func, has_aux=False)
 
-        grads_dict = torch.func.vmap(
-            func_compute_grad,
-            in_dims=(None, None, 0),
-            randomness="same",
-        )(self.func_params, self.func_buffers, batch)
+        per_example_grads = []
+        for idx in range(batch[0].shape[0]):
+            single_batch = tuple(t[idx] for t in batch)
+            per_example_grads.append(
+                func_compute_grad(self.func_params, self.func_buffers, single_batch)
+            )
+
+        grads_dict = {}
+        for name in per_example_grads[0]:
+            grads_dict[name] = torch.stack(
+                [per_example_grad[name] for per_example_grad in per_example_grads],
+                dim=0,
+            )
+
+        return grads_dict
+
+    def test_per_sample_gradient(self):
+        # Instantiate LogIX
+        logix = LogIX(project="test")
+        logix.watch(self.model)
+
+        # Input and target for batch size of 4
+        input_ids = torch.randint(0, 32, (4, 10))  # Dummy token IDs
+        attention_mask = torch.ones(4, 10)  # All tokens are 'real'
+        labels = torch.tensor([1, 0, 1, 0])  # Dummy labels
+        batch = (input_ids, attention_mask, labels)
+
+        grads_dict = self._compute_reference_grads(batch)
 
         # Forward pass with original model
-        logix.setup({"log": "grad"})
-        with logix(data_id=input):
+        logix.setup({"grad": ["log"]})
+        with logix(data_id=input_ids):
             self.model.zero_grad()
             output = self.model(input_ids, attention_mask).logits
             loss = F.cross_entropy(output, labels, reduction="sum")
@@ -92,30 +104,11 @@ class TestTransformerGradients(unittest.TestCase):
         labels = torch.tensor([1, 0, 1, 0])  # Dummy labels
         batch = (input_ids, attention_mask, labels)
 
-        # functorch per-sample gradient
-        def compute_loss_func(_params, _buffers, _batch):
-            _output = torch.func.functional_call(
-                self.func_model,
-                (_params, _buffers),
-                args=(
-                    _batch[0].unsqueeze(0),
-                    _batch[1].unsqueeze(0),
-                ),
-            )
-            _loss = F.cross_entropy(_output.logits, _batch[2].unsqueeze(0))
-            return _loss
-
-        func_compute_grad = torch.func.grad(compute_loss_func, has_aux=False)
-
-        grads_dict = torch.func.vmap(
-            func_compute_grad,
-            in_dims=(None, None, 0),
-            randomness="same",
-        )(self.func_params, self.func_buffers, batch)
+        grads_dict = self._compute_reference_grads(batch)
 
         # Forward pass with original model
-        logix.setup({"log": "grad"})
-        with logix(data_id=input, mask=attention_mask):
+        logix.setup({"grad": ["log"]})
+        with logix(data_id=input_ids, mask=attention_mask):
             self.model.zero_grad()
             output = self.model(input_ids, attention_mask).logits
             loss = F.cross_entropy(output, labels, reduction="sum")
@@ -149,30 +142,11 @@ class TestTransformerGradients(unittest.TestCase):
         labels = torch.tensor([1, 0, 1, 0])  # Dummy labels
         batch = (input_ids, attention_mask, labels)
 
-        # functorch per-sample gradient
-        def compute_loss_func(_params, _buffers, _batch):
-            _output = torch.func.functional_call(
-                self.func_model,
-                (_params, _buffers),
-                args=(
-                    _batch[0].unsqueeze(0),
-                    _batch[1].unsqueeze(0),
-                ),
-            )
-            _loss = F.cross_entropy(_output.logits, _batch[2].unsqueeze(0))
-            return _loss
-
-        func_compute_grad = torch.func.grad(compute_loss_func, has_aux=False)
-
-        grads_dict = torch.func.vmap(
-            func_compute_grad,
-            in_dims=(None, None, 0),
-            randomness="same",
-        )(self.func_params, self.func_buffers, batch)
+        grads_dict = self._compute_reference_grads(batch)
 
         # Forward pass with original model
-        logix.setup({"log": "grad"})
-        with logix(data_id=input, mask=attention_mask):
+        logix.setup({"grad": ["log"]})
+        with logix(data_id=input_ids, mask=attention_mask):
             self.model.zero_grad()
             output = self.model(input_ids, attention_mask).logits
             loss = F.cross_entropy(output, labels, reduction="sum")

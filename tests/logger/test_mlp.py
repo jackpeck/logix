@@ -1,5 +1,6 @@
 import copy
 import unittest
+import warnings
 
 import torch
 import torch.nn as nn
@@ -37,6 +38,32 @@ class TestMLPGradients(unittest.TestCase):
         self.model.eval()
         self.func_model.eval()
 
+    def test_watch_disables_non_tracked_gradients_by_default(self):
+        model = create_mlp(4, 8, 5)
+        logix = LogIX(project="test")
+
+        logix.watch(model, name_filter=["6"])
+
+        self.assertTrue(model[6].weight.requires_grad)
+        self.assertFalse(model[0].weight.requires_grad)
+        self.assertFalse(model[2].weight.requires_grad)
+        self.assertFalse(model[4].weight.requires_grad)
+
+    def test_watch_can_keep_non_tracked_gradients_enabled(self):
+        model = create_mlp(4, 8, 5)
+        logix = LogIX(project="test")
+
+        logix.watch(
+            model,
+            name_filter=["6"],
+            disable_non_tracked_gradients=False,
+        )
+
+        self.assertTrue(model[6].weight.requires_grad)
+        self.assertTrue(model[0].weight.requires_grad)
+        self.assertTrue(model[2].weight.requires_grad)
+        self.assertTrue(model[4].weight.requires_grad)
+
     def test_per_sample_gradient(self):
         # Instantiate LogIX
         logix = LogIX(project="test")
@@ -66,7 +93,7 @@ class TestMLPGradients(unittest.TestCase):
         )(self.func_params, self.func_buffers, batch)
 
         # Forward pass with original model
-        logix.setup({"log": "grad"})
+        logix.setup({"grad": ["log"]})
         with logix(data_id=inputs):
             self.model.zero_grad()
             output = self.model(inputs)
@@ -78,6 +105,29 @@ class TestMLPGradients(unittest.TestCase):
             logix_grad = logix_grads_dict[module_name]["grad"]
             func_grad = grads_dict[module_name + ".weight"]
             self.assertTrue(torch.allclose(logix_grad, func_grad, atol=1e-6))
+
+    def test_per_sample_gradient_emits_no_full_backward_hook_warning(self):
+        logix = LogIX(project="test")
+        logix.watch(self.model)
+
+        inputs = torch.randn(4, 4)
+        labels = torch.tensor([1, 3, 0, 2])
+
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            logix.setup({"grad": ["log"]})
+            with logix(data_id=inputs):
+                self.model.zero_grad()
+                output = self.model(inputs)
+                loss = F.cross_entropy(output, labels, reduction="sum")
+                loss.backward()
+
+        full_backward_hook_warnings = [
+            warning
+            for warning in caught_warnings
+            if "Full backward hook is firing" in str(warning.message)
+        ]
+        self.assertEqual(full_backward_hook_warnings, [])
 
     def test_per_sample_gradient_with_gradient_checkpoint(self):
         from torch.utils.checkpoint import checkpoint_sequential
@@ -110,7 +160,7 @@ class TestMLPGradients(unittest.TestCase):
         )(self.func_params, self.func_buffers, batch)
 
         # Forward pass with original model
-        logix.setup({"log": "grad"})
+        logix.setup({"grad": ["log"]})
         with logix(data_id=inputs):
             self.model.zero_grad()
             output = checkpoint_sequential(
@@ -156,7 +206,7 @@ class TestMLPGradients(unittest.TestCase):
         )(self.func_params, self.func_buffers, batch)
 
         # Forward pass with original model
-        logix.setup({"log": "grad"})
+        logix.setup({"grad": ["log"]})
         with logix(data_id=inputs):
             compiled_model.zero_grad()
             output = compiled_model(inputs)

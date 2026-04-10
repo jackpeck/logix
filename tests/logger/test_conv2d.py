@@ -76,7 +76,7 @@ class Test2DCNNGradients(unittest.TestCase):
         )(self.func_params, self.func_buffers, batch)
 
         # Forward pass with original model
-        logix.setup({"log": "grad"})
+        logix.setup({"grad": ["log"]})
         with logix(data_id=inputs):
             self.model.zero_grad()
             output = self.model(inputs)

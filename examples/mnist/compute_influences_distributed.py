@@ -43,7 +43,7 @@ def main():
     logix = LogIX(project="test", config="config.yaml")
 
     logix.watch(model)
-    logix.setup({"log": "grad", "statistic": "kfac"})
+    logix.setup({"forward": ["covariance"], "backward": ["covariance"]})
     id_gen = DataIDGenerator()
 
     if not args.resume:
@@ -61,7 +61,14 @@ def main():
                     loss.backward()
             logix.finalize()
             if epoch == 0:
-                logix.setup({"save": "grad", "log": "grad", "statistic": "kfac"})
+                logix.setup(
+                    {
+                        "forward": ["covariance"],
+                        "backward": ["covariance"],
+                        "grad": ["log"],
+                    }
+                )
+                logix.save(True)
                 logix.add_lora()
     else:
         logix.add_lora()
@@ -70,7 +77,6 @@ def main():
     log_loader = logix.build_log_dataloader()
     logix.eval()
 
-    logix.add_analysis({"influence": InfluenceFunction})
     query_iter = iter(query_loader)
     with logix(data_id=["test"]):
         test_input, test_target = next(query_iter)
@@ -82,9 +88,10 @@ def main():
         test_loss.backward()
     test_log = logix.get_log()
     start = time.time()
-    if_scores = logix.influence.compute_influence_all(
+    result = logix.influence.compute_influence_all(
         test_log, log_loader, damping=args.damping
     )
+    if_scores = result["influence"]
     _, top_influential_data = torch.topk(if_scores, k=10)
 
     # Save

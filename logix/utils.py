@@ -184,21 +184,6 @@ def merge_logs(log_list):
     return merged_data_id, merged_log_dict
 
 
-def flatten_log(log, path) -> torch.Tensor:
-    flat_log_list = []
-    for module, log_type in path:
-        log_module = log[module][log_type]
-        bsz = log_module.shape[0]
-        flat_log_list.append(log_module.reshape(bsz, -1))
-    flat_log = torch.cat(flat_log_list, dim=1)
-
-    return flat_log
-
-
-def unflatten_log(log, path):
-    raise NotImplementedError
-
-
 def synchronize_device(
     src: Dict[str, Dict[str, torch.Tensor]],
     tgt: Dict[str, Dict[str, torch.Tensor]],

@@ -142,49 +142,15 @@ class HookLogger:
                 cpu_offload=self.cpu_offload,
             )
 
-    def _backward_hook_fn(
-        self,
-        module: nn.Module,
-        grad_inputs: Tuple[torch.Tensor],
-        grad_outputs: Tuple[torch.Tensor],
-        module_name: str,
-    ) -> None:
-        """
-        Internal backward hook function.
-
-        Args:
-            module: The module triggering the hook.
-            grad_inputs: The gradient of the input to the module.
-            grad_outputs: The gradient of the output from the module.
-            module_name (str): The name of the module.
-        """
-        assert len(grad_outputs) == 1
-
-        error = grad_outputs[0]
-
-        if self.dtype is not None:
-            error = error.to(dtype=self.dtype)
-
-        for plugin in self.opt.backward:
-            plugin.update(
-                state=self.state,
-                binfo=self.binfo,
-                module=module,
-                module_name=module_name,
-                log_type="backward",
-                data=error,
-                cpu_offload=self.cpu_offload,
-            )
-
-    def _grad_hook_fn(
+    def _output_hook_fn(
         self,
         module: nn.Module,
         inputs: Tuple[torch.Tensor],
-        outputs: Tuple[torch.Tensor],
+        outputs: torch.Tensor,
         module_name: str,
     ) -> None:
         """
-        Internal gradient hook function.
+        Internal output hook function.
 
         Args:
             module: The module triggering the hook.
@@ -193,11 +159,29 @@ class HookLogger:
             module_name (str): The name of the module.
         """
         assert len(inputs) == 1
+        assert isinstance(outputs, torch.Tensor)
 
         # In case, the same module is used multiple times in the forward pass,
         # we need to accumulate the gradients. We achieve this by using the
         # additional tensor hook on the output of the module.
-        def _grad_backward_hook_fn(grad: torch.Tensor):
+        def _output_backward_hook_fn(grad: torch.Tensor):
+            if len(self.opt.backward) > 0:
+                error = grad
+
+                if self.dtype is not None:
+                    error = error.to(dtype=self.dtype)
+
+                for plugin in self.opt.backward:
+                    plugin.update(
+                        state=self.state,
+                        binfo=self.binfo,
+                        module=module,
+                        module_name=module_name,
+                        log_type="backward",
+                        data=error,
+                        cpu_offload=self.cpu_offload,
+                    )
+
             if len(self.opt.grad) > 0:
                 assert self.opt.grad[0] == Log
                 per_sample_gradient = compute_per_sample_gradient(
@@ -218,7 +202,7 @@ class HookLogger:
                         cpu_offload=self.cpu_offload,
                     )
 
-        tensor_hook = outputs.register_hook(_grad_backward_hook_fn)
+        tensor_hook = outputs.register_hook(_output_backward_hook_fn)
         self.tensor_hooks.append(tensor_hook)
 
     def _tensor_forward_hook_fn(self, tensor: torch.Tensor, tensor_name: str) -> None:
@@ -280,18 +264,16 @@ class HookLogger:
             # separately. We use partial functions to pass the module name to
             # the hook functions.
             module_name = self.modules_to_name[module]
-            forward_hook = module.register_forward_pre_hook(
-                partial(self._forward_hook_fn, module_name=module_name)
-            )
-            backward_hook = module.register_full_backward_hook(
-                partial(self._backward_hook_fn, module_name=module_name)
-            )
-            grad_hook = module.register_forward_hook(
-                partial(self._grad_hook_fn, module_name=module_name)
-            )
-            self.forward_hooks.append(forward_hook)
-            self.backward_hooks.append(backward_hook)
-            self.grad_hooks.append(grad_hook)
+            if len(self.opt.forward) > 0:
+                forward_hook = module.register_forward_pre_hook(
+                    partial(self._forward_hook_fn, module_name=module_name)
+                )
+                self.forward_hooks.append(forward_hook)
+            if len(self.opt.backward) > 0 or len(self.opt.grad) > 0:
+                grad_hook = module.register_forward_hook(
+                    partial(self._output_hook_fn, module_name=module_name)
+                )
+                self.grad_hooks.append(grad_hook)
 
     def register_all_tensor_hooks(self, tensor_dict: Dict[str, torch.Tensor]) -> None:
         """

@@ -106,31 +106,6 @@ class LoRAConfig:
 
 
 @dataclass
-class InfluenceConfig:
-    """
-    Configuration for influence.
-
-    Args:
-        damping: Damping for influence.
-        relative_damping: Compute the damping term based on sigular values.
-        mode: Mode for influence.
-    """
-
-    log_dir: str = field(init=False)
-    damping: float = field(
-        default=1e-10, metadata={"help": "Damping strength for influence."}
-    )
-    relative_damping: bool = field(
-        default=False,
-        metadata={"help": "Compute the damping term based on sigular values."},
-    )
-    mode: str = field(default="dot", metadata={"help": "Mode for influence."})
-    flatten: bool = field(
-        default=False, metadata={"help": "flattening flag for logging"}
-    )
-
-
-@dataclass
 class Config:
     """
     Configuration management class.
@@ -141,7 +116,6 @@ class Config:
         root_dir: Root directory for logging.
         logging: Logging configuration.
         lora: LoRA configuration.
-        analysis: Analysis configuration.
     """
 
     project: str

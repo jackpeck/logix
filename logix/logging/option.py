@@ -14,17 +14,16 @@
 
 from typing import Any, List
 
-from logix.statistic import CorrectedEigval, Covariance, Log, Mean, Variance
+from logix.statistic import CorrectedEigval, Covariance, Log, Mean
 from logix.utils import get_logger
 
 _PLUGIN_MAPPING = {
     "log": Log,
     "mean": Mean,
-    "variance": Variance,
     "covariance": Covariance,
     "corrected_eigval": CorrectedEigval,
 }
-_PLUGIN_LIST = [Log, Mean, Variance, Covariance, CorrectedEigval]
+_PLUGIN_LIST = [Log, Mean, Covariance, CorrectedEigval]
 
 
 def _reorder_plugins(plugins):
@@ -36,7 +35,7 @@ def _reorder_plugins(plugins):
     Returns:
         List of plugins in the correct order.
     """
-    order = [Log, Mean, Variance, Covariance, CorrectedEigval]
+    order = [Log, Mean, Covariance, CorrectedEigval]
     ordered_plugins = []
     for plugin in order:
         if plugin in plugins:
@@ -88,6 +87,15 @@ class LogOption:
             statistic: Statistic configurations.
         """
         self.clear()
+
+        valid_keys = {"forward", "backward", "grad"}
+        unknown_keys = set(log_option_kwargs.keys()) - valid_keys
+        if unknown_keys:
+            raise ValueError(
+                "Unknown logging option keys: {}. Supported keys are: {}.".format(
+                    sorted(unknown_keys), sorted(valid_keys)
+                )
+            )
 
         forward = log_option_kwargs.get("forward", [])
         backward = log_option_kwargs.get("backward", [])

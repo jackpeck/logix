@@ -117,6 +117,7 @@ class LogIXState:
             damping: Damping for the covariance.
         """
         self.register_state("covariance_inverse_state", save=True)
+        self.covariance_inverse_state.clear()
 
         for module_name, module_state in self.covariance_state.items():
             for mode, cov in module_state.items():
@@ -126,6 +127,7 @@ class LogIXState:
                 self.covariance_inverse_state[module_name][mode] = torch.inverse(
                     cov + damping_module * torch.eye(cov.size(0)).to(device=cov.device)
                 )
+        self._covariance_inverse_damping = damping
 
     def get_covariance_state(self) -> Dict[str, Dict[str, torch.Tensor]]:
         """
@@ -140,7 +142,9 @@ class LogIXState:
         Return the covariance inverse state. If the state is not computed, compute
         it first.
         """
-        if not hasattr(self, "covariance_inverse_state"):
+        if not hasattr(self, "covariance_inverse_state") or getattr(
+            self, "_covariance_inverse_damping", None
+        ) != damping:
             self.covariance_inverse(damping=damping)
         return self.covariance_inverse_state
 
@@ -237,6 +241,9 @@ class LogIXState:
             "_states_to_synchronize": self._states_to_synchronize,
             "_states_to_save": self._states_to_save,
             "_states_to_normalize": self._states_to_normalize,
+            "_covariance_inverse_damping": getattr(
+                self, "_covariance_inverse_damping", None
+            ),
         }
         torch.save(others, os.path.join(state_log_dir, "others.pt"))
 
@@ -246,12 +253,16 @@ class LogIXState:
         """
         state_log_dir = os.path.join(log_dir, "state")
 
-        others = torch.load(os.path.join(state_log_dir, "others.pt"))
+        others = torch.load(
+            os.path.join(state_log_dir, "others.pt"), weights_only=False
+        )
         for key, value in others.items():
             setattr(self, key, value)
 
         for state_name in self._states_to_save:
-            state_dict = torch.load(os.path.join(state_log_dir, f"{state_name}.pt"))
+            state_dict = torch.load(
+                os.path.join(state_log_dir, f"{state_name}.pt"), weights_only=False
+            )
             setattr(self, state_name, state_dict)
 
     def set_state(self, state_name: str, **kwargs) -> None:

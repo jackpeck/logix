@@ -16,4 +16,3 @@ from .corrected_eigval import CorrectedEigval
 from .covariance import Covariance
 from .log import Log
 from .mean import Mean
-from .variance import Variance

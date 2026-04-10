@@ -29,15 +29,6 @@ def init(project: str, config: str = "./config.yaml"):
 
     return run
 
-
-def add_analysis(*args, **kwargs):
-    if _LOGIX_INSTANCE is None:
-        raise RuntimeError(
-            "LogIX is not initialized. You must call logix.init() first."
-        )
-    return _LOGIX_INSTANCE.add_analysis(*args, **kwargs)
-
-
 def add_lora(*args, **kwargs):
     if _LOGIX_INSTANCE is None:
         raise RuntimeError(

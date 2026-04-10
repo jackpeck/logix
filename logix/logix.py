@@ -56,7 +56,7 @@ class LogIX:
             which means default settings are used.
     """
 
-    _SUPPORTED_MODULES = {nn.Linear, nn.Conv1d, nn.Conv2d}
+    _SUPPORTED_MODULES = {nn.Linear, nn.Conv2d}
 
     def __init__(
         self,
@@ -103,12 +103,13 @@ class LogIX:
         model: nn.Module,
         type_filter: Optional[List[nn.Module]] = None,
         name_filter: Optional[List[str]] = None,
+        disable_non_tracked_gradients: bool = True,
     ) -> None:
         """
         Sets up modules in the model to be watched based on optional type and name filters.
         Hooks will be added to the watched modules to track their forward activations,
         backward error signals, and gradient, and compute various statistics (e.g. mean,
-        variance, covariance) for each of these.
+        covariance) for each of these.
 
         Args:
             model (nn.Module):
@@ -118,6 +119,9 @@ class LogIX:
                 are watched.
             name_filter (List[str], optional):
                 A list of module names to be watched. If None, all modules are considered.
+            disable_non_tracked_gradients (bool, optional):
+                Whether to set `requires_grad=False` for parameters in non-tracked leaf
+                modules. Defaults to True.
         """
         self.model = model
         if get_world_size() > 1 and hasattr(self.model, "module"):
@@ -126,6 +130,11 @@ class LogIX:
         self.name_filter = name_filter or self.name_filter
 
         _is_lora = is_lora(self.model)
+
+        if disable_non_tracked_gradients:
+            get_logger().info("Disabling gradients for non-tracked leaf modules.")
+        else:
+            get_logger().info("Leaving gradients enabled for non-tracked leaf modules.")
 
         for name, module in self.model.named_modules():
             if module_check(
@@ -137,7 +146,7 @@ class LogIX:
                 is_lora=_is_lora,
             ):
                 self.logger.add_module(name, module)
-            elif len(list(module.children())) == 0:
+            elif disable_non_tracked_gradients and len(list(module.children())) == 0:
                 # disable gradient compute for non-tracked modules. This will save a
                 # significant amount of GPU memory and compute for large models
                 for p in module.parameters():
@@ -312,20 +321,17 @@ class LogIX:
         """
         self.logger.update(save=save or self._save)
 
-    def build_log_dataset(self, flatten: bool = False) -> torch.utils.data.Dataset:
+    def build_log_dataset(self) -> torch.utils.data.Dataset:
         """
         Constructs the log dataset from the stored logs. This dataset can then be used
         for analysis or visualization.
-
-        Args:
-            flatten (bool, optional): Whether to flatten the nested dictionary structure. Defaults to False.
 
         Returns:
             LogDataset:
                 An instance of LogDataset containing the logged data.
         """
         if self.log_dataset is None:
-            self.log_dataset = LogDataset(log_dir=self.log_dir, flatten=flatten)
+            self.log_dataset = LogDataset(log_dir=self.log_dir)
         return self.log_dataset
 
     def build_log_dataloader(
@@ -333,7 +339,6 @@ class LogIX:
         batch_size: int = 16,
         num_workers: int = 0,
         pin_memory: bool = False,
-        flatten: bool = False,
     ) -> torch.utils.data.DataLoader:
         """
         Constructs a DataLoader for the log dataset. This is useful for batch processing
@@ -343,22 +348,20 @@ class LogIX:
             batch_size (int, optional): The batch size for the DataLoader. Defaults to 16.
             num_workers (int, optional): The number of workers for the DataLoader. Defaults to 0.
             pin_memory (bool, optional): Whether to pin memory for the DataLoader. Defaults to False.
-            flatten (bool, optional): Whether to flatten the nested dictionary structure. Defaults to False.
 
         Return:
             DataLoader:
                 A DataLoader instance for the log dataset.
         """
         if self.log_dataloader is None:
-            log_dataset = self.build_log_dataset(flatten=flatten)
-            collate_fn = None if flatten else collate_nested_dicts
+            log_dataset = self.build_log_dataset()
             self.log_dataloader = torch.utils.data.DataLoader(
                 log_dataset,
                 batch_size=batch_size,
                 num_workers=num_workers,
                 pin_memory=pin_memory,
                 shuffle=False,
-                collate_fn=collate_fn,
+                collate_fn=collate_nested_dicts,
             )
         return self.log_dataloader
 

@@ -25,7 +25,7 @@ from logix.analysis.influence_function_utils import (
     precondition_raw,
 )
 from logix.state import LogIXState
-from logix.utils import flatten_log, get_logger, synchronize_device, unflatten_log
+from logix.utils import get_logger, synchronize_device
 
 
 class InfluenceFunction:
@@ -108,6 +108,8 @@ class InfluenceFunction:
 
         src_ids, src = src_log
         tgt_ids, tgt = tgt_log
+        assert isinstance(src, dict)
+        assert isinstance(tgt, dict)
 
         # Initialize influence scores
         total_influence = {"total": 0}
@@ -119,24 +121,16 @@ class InfluenceFunction:
         # gradients. If mode is cosine, we should normalize the influence score by the
         # L2 norm of the target gardients. If mode is l2, we should subtract the L2
         # norm of the target gradients.
-        if not isinstance(tgt, dict):
-            assert isinstance(tgt, torch.Tensor)
-            src = flatten_log(
-                log=src, path=self._state.get_state("model_module")["path"]
+        synchronize_device(src, tgt)
+        for module_name in src.keys():
+            module_influence = cross_dot_product(
+                src[module_name]["grad"], tgt[module_name]["grad"]
             )
-            tgt = tgt.to(device=src.device)
-            total_influence["total"] += cross_dot_product(src, tgt)
-        else:
-            synchronize_device(src, tgt)
-            for module_name in src.keys():
-                module_influence = cross_dot_product(
-                    src[module_name]["grad"], tgt[module_name]["grad"]
-                )
-                total_influence["total"] += module_influence
-                if influence_groups is not None:
-                    groups = [g for g in influence_groups if g in module_name]
-                    for group in groups:
-                        total_influence[group] += module_influence
+            total_influence["total"] += module_influence
+            if influence_groups is not None:
+                groups = [g for g in influence_groups if g in module_name]
+                for group in groups:
+                    total_influence[group] += module_influence
 
         if mode == "cosine":
             tgt_norm = self.compute_self_influence(
@@ -197,11 +191,7 @@ class InfluenceFunction:
         result = {}
 
         src_ids, src = src_log
-        if not isinstance(src, dict):
-            assert isinstance(src, torch.Tensor)
-            src = unflatten_log(
-                log=src, path=self._state.get_state("model_module")["path"]
-            )
+        assert isinstance(src, dict)
 
         tgt = src
         if precondition:

@@ -29,6 +29,8 @@ class LogSaver:
 
         self.max_worker = config.num_workers
         self.allow_async = True if self.max_worker > 1 else False
+        self._executor = None
+        self._pending_flushes = []
 
         self.flush_threshold = config.flush_threshold
         self.flush_count = 0
@@ -55,30 +57,49 @@ class LogSaver:
         for idx, did in enumerate(data_id):
             _add(log, self.buffer[did], idx)
 
-    def _flush_unsafe(self, log_dir, buffer, flush_count) -> str:
+    def _flush_unsafe(self, log_dir, buffer_list, flush_count) -> str:
         """
         _flush_unsafe is thread unsafe flush of current buffer. No shared variable must be allowed.
         """
         filename = self.file_prefix + f"{flush_count}.mmap"
-        buffer_list = [(k, v) for k, v in buffer]
         MemoryMapHandler.write(
             log_dir, filename, buffer_list, self.model_module["path"]
         )
         return filename
 
+    def _ensure_executor(self) -> None:
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=self.max_worker)
+
+    def _collect_pending_flushes(self, wait: bool = False) -> None:
+        remaining_futures = []
+        for future in self._pending_flushes:
+            if wait or future.done():
+                future.result()
+            else:
+                remaining_futures.append(future)
+        self._pending_flushes = remaining_futures
+
     def _flush_safe(self, log_dir) -> str:
         """
         _flush_safe is thread safe flush of current buffer.
         """
-        buffer_copy = self.buffer.copy()
+        if len(self.buffer) == 0:
+            return log_dir
+
+        self._collect_pending_flushes(wait=False)
+
+        buffer_list = [(k, v) for k, v in self.buffer.items()]
         flush_count_copy = self.flush_count
         self.flush_count += 1
         self.buffer_clear()
-        with ThreadPoolExecutor(max_workers=self.max_worker) as executor:
-            save_path = executor.submit(
-                self._flush_unsafe, log_dir, buffer_copy, flush_count_copy
-            )
-        return save_path
+        self._ensure_executor()
+        future = self._executor.submit(
+            self._flush_unsafe, log_dir, buffer_list, flush_count_copy
+        )
+        self._pending_flushes.append(future)
+
+        return log_dir
 
     def _flush_serialized(self, log_dir) -> str:
         """
@@ -105,6 +126,8 @@ class LogSaver:
         For the DefaultHandler, there's no batch operation needed since each add operation writes to the file.
         This can be a placeholder or used for any finalization operations.
         """
+        if self.allow_async:
+            self._collect_pending_flushes(wait=False)
         if 0 < self.flush_threshold < self.buffer_size:
             if self.allow_async:
                 self._flush_safe(self.log_dir)
@@ -115,7 +138,16 @@ class LogSaver:
         """
         Dump everything in the buffer to disk when `logix.finalize()` is called.
         """
-        self._flush_serialized(self.log_dir)
+        try:
+            if self.allow_async:
+                self._collect_pending_flushes(wait=False)
+            self._flush_serialized(self.log_dir)
+            if self.allow_async:
+                self._collect_pending_flushes(wait=True)
+        finally:
+            if self._executor is not None:
+                self._executor.shutdown(wait=True)
+                self._executor = None
 
     def buffer_clear(self):
         """

@@ -46,9 +46,10 @@ def precondition_kfac(
             fwd_eigval = module_eigval["forward"]
             bwd_eigval = module_eigval["backward"]
             full_eigval = torch.outer(bwd_eigval, fwd_eigval).to(device=device)
-        if damping is None:
-            damping = 0.1 * torch.mean(full_eigval)
-        full_eigval += damping
+        module_damping = damping
+        if module_damping is None:
+            module_damping = 0.1 * torch.mean(full_eigval)
+        full_eigval += module_damping
 
         # Precondition the gradient using eigenvectors and eigenvalues
         rotated_grad = einsum(

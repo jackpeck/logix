@@ -26,13 +26,12 @@ from logix.logging.log_loader_utils import (
 
 
 class LogDataset(Dataset):
-    def __init__(self, log_dir, flatten):
+    def __init__(self, log_dir):
         self.chunk_indices = None
         self.memmaps = []
 
         self.data_id_to_chunk = OrderedDict()
         self.log_dir = log_dir
-        self.flatten = flatten
 
         # Find all chunk indices
         self.chunk_indices = find_chunk_indices(self.log_dir)
@@ -63,8 +62,6 @@ class LogDataset(Dataset):
         flat_tensor = get_flatten_item(
             mmap, offset, entry["block_size"], entry["dtype"]
         )
-        if self.flatten:
-            return data_id, flat_tensor
         start = 0
         for i in range(len(entry["path"])):
             path = entry["path"][i]

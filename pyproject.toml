@@ -5,12 +5,17 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "datasets>=4.8.4",
+    "datasets>=2.19.1",
     "einops>=0.8.2",
-    "numpy>=2.4.4",
+    "numpy>=2.4.3",
     "pyyaml>=6.0.3",
-    "torch>=2.11.0",
-    "torchvision>=0.26.0",
-    "tqdm>=4.67.3",
+    "torch>=2.6.0",
+    "tqdm>=4.66.5",
     "transformers>=5.5.3",
 ]
+
+[tool.uv]
+extra-index-url = ["https://download.pytorch.org/whl/cu124"]
+
+[tool.setuptools.packages.find]
+include = ["logix*"]
